@@ -701,6 +701,39 @@ func TestDatabases_ResetUserAuth(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestDatabases_ResetUserKafka(t *testing.T) {
+	setup()
+	defer teardown()
+	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
+	path := fmt.Sprintf("/v2/databases/%s/users/user/reset_auth", dbID)
+
+	body := `{
+	  "user": {
+	     "name": "name",
+	     "role": "foo",
+	     "password": "otherpass"
+	  }
+	}`
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodPost)
+		fmt.Fprint(w, body)
+	})
+
+	want := &DatabaseUser{
+		Name:     "name",
+		Role:     "foo",
+		Password: "otherpass",
+	}
+
+	got, _, err := client.Databases.ResetUserAuth(ctx, dbID, "user", &DatabaseResetUserAuthRequest{
+		KafkaSettings: &DatabaseKafkaUserSettings{},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestDatabases_ListDBs(t *testing.T) {
 	setup()
 	defer teardown()
@@ -1059,27 +1092,6 @@ func TestDatabases_DeletePool(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestDatabases_UpdatePool(t *testing.T) {
-	setup()
-	defer teardown()
-
-	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
-
-	path := fmt.Sprintf("/v2/databases/%s/pools/pool", dbID)
-
-	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, http.MethodPut)
-	})
-
-	_, err := client.Databases.UpdatePool(ctx, dbID, "pool", &DatabaseUpdatePoolRequest{
-		User:     "user",
-		Size:     12,
-		Database: "db",
-		Mode:     "transaction",
-	})
-	require.NoError(t, err)
-}
-
 func TestDatabases_GetReplica(t *testing.T) {
 	setup()
 	defer teardown()
@@ -1089,7 +1101,6 @@ func TestDatabases_GetReplica(t *testing.T) {
 	createdAt := time.Date(2019, 01, 01, 0, 0, 0, 0, time.UTC)
 
 	want := &DatabaseReplica{
-		ID:        "326f188b-5dd1-45fc-9584-62ad553107cd",
 		Name:      "pool",
 		Region:    "nyc1",
 		Status:    "online",
@@ -1119,7 +1130,6 @@ func TestDatabases_GetReplica(t *testing.T) {
 	body := `
 {
   "replica": {
-    "id": "326f188b-5dd1-45fc-9584-62ad553107cd",
     "name": "pool",
     "region": "nyc1",
     "status": "online",
@@ -1319,22 +1329,6 @@ func TestDatabases_CreateReplica(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-}
-
-func TestDatabases_PromoteReplicaToPrimary(t *testing.T) {
-	setup()
-	defer teardown()
-
-	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
-
-	path := fmt.Sprintf("/v2/databases/%s/replicas/replica/promote", dbID)
-
-	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, http.MethodPut)
-	})
-
-	_, err := client.Databases.PromoteReplicaToPrimary(ctx, dbID, "replica")
-	require.NoError(t, err)
 }
 
 func TestDatabases_DeleteReplica(t *testing.T) {
@@ -1605,6 +1599,24 @@ func TestDatabases_GetDatabaseOptions(t *testing.T) {
 					}
 				]
 			},
+			"kafka": {
+				"regions": [
+					"ams3",
+					"tor1"
+				],
+				"versions": [
+					"3.3"
+				],
+				"layouts": [
+					{
+						"num_nodes": 3,
+						"sizes": [
+							"gd-2vcpu-8gb",
+	            "gd-4vcpu-16gb"
+						]
+					}
+				]
+			},
 			"redis": {
 				"regions": [
 					"ams3",
@@ -1631,7 +1643,7 @@ func TestDatabases_GetDatabaseOptions(t *testing.T) {
 				]
 			}
 		}
-	} `
+	}`
 
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, http.MethodGet)
@@ -1645,18 +1657,22 @@ func TestDatabases_GetDatabaseOptions(t *testing.T) {
 	require.NotNil(t, options.PostgresSQLOptions)
 	require.NotNil(t, options.RedisOptions)
 	require.NotNil(t, options.MySQLOptions)
+	require.NotNil(t, options.KafkaOptions)
 	require.Greater(t, len(options.MongoDBOptions.Regions), 0)
 	require.Greater(t, len(options.PostgresSQLOptions.Regions), 0)
 	require.Greater(t, len(options.RedisOptions.Regions), 0)
 	require.Greater(t, len(options.MySQLOptions.Regions), 0)
+	require.Greater(t, len(options.KafkaOptions.Regions), 0)
 	require.Greater(t, len(options.MongoDBOptions.Versions), 0)
 	require.Greater(t, len(options.PostgresSQLOptions.Versions), 0)
 	require.Greater(t, len(options.RedisOptions.Versions), 0)
 	require.Greater(t, len(options.MySQLOptions.Versions), 0)
+	require.Greater(t, len(options.KafkaOptions.Versions), 0)
 	require.Greater(t, len(options.MongoDBOptions.Layouts), 0)
 	require.Greater(t, len(options.PostgresSQLOptions.Layouts), 0)
 	require.Greater(t, len(options.RedisOptions.Layouts), 0)
 	require.Greater(t, len(options.MySQLOptions.Layouts), 0)
+	require.Greater(t, len(options.KafkaOptions.Layouts), 0)
 }
 
 func TestDatabases_CreateDatabaseUserWithMySQLSettings(t *testing.T) {
@@ -1696,6 +1712,56 @@ func TestDatabases_CreateDatabaseUserWithMySQLSettings(t *testing.T) {
 	require.Equal(t, expectedUser, user)
 }
 
+func TestDatabases_CreateDatabaseUserWithKafkaSettings(t *testing.T) {
+	setup()
+	defer teardown()
+
+	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
+	path := fmt.Sprintf("/v2/databases/%s/users", dbID)
+
+	writeTopicACL := []*KafkaACL{
+		&KafkaACL{
+			ID:         "1",
+			Topic:      "bar",
+			Permission: "write",
+		},
+	}
+
+	acljson, err := json.Marshal(writeTopicACL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	responseJSON := []byte(fmt.Sprintf(`{
+		"user": {
+			"name": "foo",
+			"settings": {
+				"acl": %s
+			}
+		}
+	}`, string(acljson)))
+
+	expectedUser := &DatabaseUser{
+		Name: "foo",
+		KafkaSettings: &DatabaseKafkaUserSettings{
+			ACL: writeTopicACL,
+		},
+	}
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodPost)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	})
+
+	user, _, err := client.Databases.CreateUser(ctx, dbID, &DatabaseCreateUserRequest{
+		Name:          expectedUser.Name,
+		KafkaSettings: &DatabaseKafkaUserSettings{ACL: expectedUser.KafkaSettings.ACL},
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectedUser, user)
+}
+
 func TestDatabases_ListDatabaseUsersWithMySQLSettings(t *testing.T) {
 	setup()
 	defer teardown()
@@ -1719,6 +1785,58 @@ func TestDatabases_ListDatabaseUsersWithMySQLSettings(t *testing.T) {
 			Name: "foo",
 			MySQLSettings: &DatabaseMySQLUserSettings{
 				AuthPlugin: SQLAuthPluginNative,
+			},
+		},
+	}
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodGet)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	})
+
+	users, _, err := client.Databases.ListUsers(ctx, dbID, &ListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, expectedUsers, users)
+}
+
+func TestDatabases_ListDatabaseUsersWithKafkaSettings(t *testing.T) {
+	setup()
+	defer teardown()
+
+	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
+
+	path := fmt.Sprintf("/v2/databases/%s/users", dbID)
+
+	writeTopicACL := []*KafkaACL{
+		&KafkaACL{
+			ID:         "1",
+			Topic:      "bar",
+			Permission: "write",
+		},
+	}
+
+	acljson, err := json.Marshal(writeTopicACL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	responseJSON := []byte(fmt.Sprintf(`{
+		"users": [
+			{
+				"name": "foo",
+				"settings": {
+					"acl": %s
+				}
+			}
+		]
+	}`, string(acljson)))
+
+	expectedUsers := []DatabaseUser{
+		{
+			Name: "foo",
+			KafkaSettings: &DatabaseKafkaUserSettings{
+				ACL: writeTopicACL,
 			},
 		},
 	}
@@ -1769,6 +1887,55 @@ func TestDatabases_GetDatabaseUserWithMySQLSettings(t *testing.T) {
 	require.Equal(t, expectedUser, user)
 }
 
+func TestDatabases_GetDatabaseUserWithKafkaSettings(t *testing.T) {
+	setup()
+	defer teardown()
+
+	dbID := "deadbeef-dead-4aa5-beef-deadbeef347d"
+	userID := "d290a0a0-27da-42bd-a4b2-bcecf43b8832"
+
+	path := fmt.Sprintf("/v2/databases/%s/users/%s", dbID, userID)
+
+	writeTopicACL := []*KafkaACL{
+		&KafkaACL{
+			ID:         "1",
+			Topic:      "bar",
+			Permission: "write",
+		},
+	}
+
+	acljson, err := json.Marshal(writeTopicACL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	responseJSON := []byte(fmt.Sprintf(`{
+		"user": {
+			"name": "foo",
+			"settings": {
+				"acl": %s
+			}
+		}
+	}`, string(acljson)))
+
+	expectedUser := &DatabaseUser{
+		Name: "foo",
+		KafkaSettings: &DatabaseKafkaUserSettings{
+			ACL: writeTopicACL,
+		},
+	}
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodGet)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	})
+
+	user, _, err := client.Databases.GetUser(ctx, dbID, userID)
+	require.NoError(t, err)
+	require.Equal(t, expectedUser, user)
+}
+
 func TestDatabases_GetConfigPostgres(t *testing.T) {
 	setup()
 	defer teardown()
@@ -1805,27 +1972,27 @@ func TestDatabases_GetConfigPostgres(t *testing.T) {
 }`
 
 		postgresConfig = PostgreSQLConfig{
-			AutovacuumNaptime:               PtrTo(60),
-			AutovacuumVacuumThreshold:       PtrTo(50),
-			AutovacuumAnalyzeThreshold:      PtrTo(50),
-			AutovacuumVacuumScaleFactor:     PtrTo(float32(0.2)),
-			AutovacuumAnalyzeScaleFactor:    PtrTo(float32(0.2)),
-			AutovacuumVacuumCostDelay:       PtrTo(20),
-			AutovacuumVacuumCostLimit:       PtrTo(-1),
-			BGWriterFlushAfter:              PtrTo(512),
-			BGWriterLRUMaxpages:             PtrTo(100),
-			BGWriterLRUMultiplier:           PtrTo(float32(2)),
-			IdleInTransactionSessionTimeout: PtrTo(0),
-			JIT:                             PtrTo(true),
-			LogAutovacuumMinDuration:        PtrTo(-1),
-			LogMinDurationStatement:         PtrTo(-1),
-			MaxPreparedTransactions:         PtrTo(0),
-			MaxParallelWorkers:              PtrTo(8),
-			MaxParallelWorkersPerGather:     PtrTo(2),
-			TempFileLimit:                   PtrTo(-1),
-			WalSenderTimeout:                PtrTo(60000),
-			BackupHour:                      PtrTo(18),
-			BackupMinute:                    PtrTo(26),
+			AutovacuumNaptime:               intPtr(60),
+			AutovacuumVacuumThreshold:       intPtr(50),
+			AutovacuumAnalyzeThreshold:      intPtr(50),
+			AutovacuumVacuumScaleFactor:     float32Ptr(0.2),
+			AutovacuumAnalyzeScaleFactor:    float32Ptr(0.2),
+			AutovacuumVacuumCostDelay:       intPtr(20),
+			AutovacuumVacuumCostLimit:       intPtr(-1),
+			BGWriterFlushAfter:              intPtr(512),
+			BGWriterLRUMaxpages:             intPtr(100),
+			BGWriterLRUMultiplier:           float32Ptr(2),
+			IdleInTransactionSessionTimeout: intPtr(0),
+			JIT:                             boolPtr(true),
+			LogAutovacuumMinDuration:        intPtr(-1),
+			LogMinDurationStatement:         intPtr(-1),
+			MaxPreparedTransactions:         intPtr(0),
+			MaxParallelWorkers:              intPtr(8),
+			MaxParallelWorkersPerGather:     intPtr(2),
+			TempFileLimit:                   intPtr(-1),
+			WalSenderTimeout:                intPtr(60000),
+			BackupHour:                      intPtr(18),
+			BackupMinute:                    intPtr(26),
 		}
 	)
 
@@ -1847,10 +2014,10 @@ func TestDatabases_UpdateConfigPostgres(t *testing.T) {
 		dbID           = "deadbeef-dead-4aa5-beef-deadbeef347d"
 		path           = fmt.Sprintf("/v2/databases/%s/config", dbID)
 		postgresConfig = &PostgreSQLConfig{
-			AutovacuumNaptime:          PtrTo(75),
-			AutovacuumVacuumThreshold:  PtrTo(45),
-			AutovacuumAnalyzeThreshold: PtrTo(45),
-			MaxPreparedTransactions:    PtrTo(0),
+			AutovacuumNaptime:          intPtr(75),
+			AutovacuumVacuumThreshold:  intPtr(45),
+			AutovacuumAnalyzeThreshold: intPtr(45),
+			MaxPreparedTransactions:    intPtr(0),
 		}
 	)
 
@@ -1896,14 +2063,14 @@ func TestDatabases_GetConfigRedis(t *testing.T) {
 }`
 
 		redisConfig = RedisConfig{
-			RedisMaxmemoryPolicy:      PtrTo("allkeys-lru"),
-			RedisLFULogFactor:         PtrTo(10),
-			RedisLFUDecayTime:         PtrTo(1),
-			RedisSSL:                  PtrTo(true),
-			RedisTimeout:              PtrTo(300),
-			RedisNotifyKeyspaceEvents: PtrTo(""),
-			RedisPersistence:          PtrTo("off"),
-			RedisACLChannelsDefault:   PtrTo("allchannels"),
+			RedisMaxmemoryPolicy:      strPtr("allkeys-lru"),
+			RedisLFULogFactor:         intPtr(10),
+			RedisLFUDecayTime:         intPtr(1),
+			RedisSSL:                  boolPtr(true),
+			RedisTimeout:              intPtr(300),
+			RedisNotifyKeyspaceEvents: strPtr(""),
+			RedisPersistence:          strPtr("off"),
+			RedisACLChannelsDefault:   strPtr("allchannels"),
 		}
 	)
 
@@ -1925,9 +2092,9 @@ func TestDatabases_UpdateConfigRedis(t *testing.T) {
 		dbID        = "deadbeef-dead-4aa5-beef-deadbeef347d"
 		path        = fmt.Sprintf("/v2/databases/%s/config", dbID)
 		redisConfig = &RedisConfig{
-			RedisMaxmemoryPolicy:      PtrTo("allkeys-lru"),
-			RedisLFULogFactor:         PtrTo(10),
-			RedisNotifyKeyspaceEvents: PtrTo(""),
+			RedisMaxmemoryPolicy:      strPtr("allkeys-lru"),
+			RedisLFULogFactor:         intPtr(10),
+			RedisNotifyKeyspaceEvents: strPtr(""),
 		}
 	)
 
@@ -1978,7 +2145,7 @@ func TestDatabases_UpdateConfigRedisNormalizeEvictionPolicy(t *testing.T) {
 			dbID        = "deadbeef-dead-4aa5-beef-deadbeef347d"
 			path        = fmt.Sprintf("/v2/databases/%s/config", dbID)
 			redisConfig = &RedisConfig{
-				RedisMaxmemoryPolicy: PtrTo(tt.input),
+				RedisMaxmemoryPolicy: strPtr(tt.input),
 			}
 		)
 
@@ -2024,16 +2191,16 @@ func TestDatabases_GetConfigMySQL(t *testing.T) {
 }`
 
 		mySQLConfig = MySQLConfig{
-			SQLMode:                     PtrTo("ANSI,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,NO_ZERO_DATE,NO_ZERO_IN_DATE,STRICT_ALL_TABLES"),
-			SQLRequirePrimaryKey:        PtrTo(true),
-			InnodbFtMinTokenSize:        PtrTo(3),
-			InnodbFtServerStopwordTable: PtrTo(""),
-			InnodbPrintAllDeadlocks:     PtrTo(false),
-			InnodbRollbackOnTimeout:     PtrTo(false),
-			SlowQueryLog:                PtrTo(false),
-			LongQueryTime:               PtrTo(float32(10)),
-			BackupHour:                  PtrTo(21),
-			BackupMinute:                PtrTo(59),
+			SQLMode:                     strPtr("ANSI,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,NO_ZERO_DATE,NO_ZERO_IN_DATE,STRICT_ALL_TABLES"),
+			SQLRequirePrimaryKey:        boolPtr(true),
+			InnodbFtMinTokenSize:        intPtr(3),
+			InnodbFtServerStopwordTable: strPtr(""),
+			InnodbPrintAllDeadlocks:     boolPtr(false),
+			InnodbRollbackOnTimeout:     boolPtr(false),
+			SlowQueryLog:                boolPtr(false),
+			LongQueryTime:               float32Ptr(10),
+			BackupHour:                  intPtr(21),
+			BackupMinute:                intPtr(59),
 		}
 	)
 
@@ -2055,9 +2222,9 @@ func TestDatabases_UpdateConfigMySQL(t *testing.T) {
 		dbID        = "deadbeef-dead-4aa5-beef-deadbeef347d"
 		path        = fmt.Sprintf("/v2/databases/%s/config", dbID)
 		mySQLConfig = &MySQLConfig{
-			SQLRequirePrimaryKey:        PtrTo(true),
-			InnodbFtMinTokenSize:        PtrTo(3),
-			InnodbFtServerStopwordTable: PtrTo(""),
+			SQLRequirePrimaryKey:        boolPtr(true),
+			InnodbFtMinTokenSize:        intPtr(3),
+			InnodbFtServerStopwordTable: strPtr(""),
 		}
 	)
 
@@ -2080,26 +2247,222 @@ func TestDatabases_UpdateConfigMySQL(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestDatabases_UpgradeMajorVersion(t *testing.T) {
+func TestDatabases_CreateTopic(t *testing.T) {
 	setup()
 	defer teardown()
 
 	var (
 		dbID              = "deadbeef-dead-4aa5-beef-deadbeef347d"
-		path              = fmt.Sprintf("/v2/databases/%s/upgrade", dbID)
-		upgradeVersionReq = &UpgradeVersionRequest{
-			Version: "14",
-		}
+		numPartitions     = uint32(3)
+		replicationFactor = uint32(2)
+		retentionMS       = int64(1000 * 60)
 	)
+
+	want := &DatabaseTopic{
+		Name:              "events",
+		PartitionCount:    &numPartitions,
+		ReplicationFactor: &replicationFactor,
+		Config: &TopicConfig{
+			RetentionMS: &retentionMS,
+		},
+	}
+
+	body := `{
+	  "topic": {
+	    "name": "events",
+	    "partition_count": 3,
+	    "replication_factor": 2,
+	    "config": {
+	    	"retention_ms": 60000
+	    }
+	  }
+	}`
+
+	path := fmt.Sprintf("/v2/databases/%s/topics", dbID)
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodPost)
+		fmt.Fprint(w, body)
+	})
+
+	topic, _, err := client.Databases.CreateTopic(ctx, dbID, &DatabaseCreateTopicRequest{
+		Name:              "events",
+		PartitionCount:    &numPartitions,
+		ReplicationFactor: &replicationFactor,
+		Config: &TopicConfig{
+			RetentionMS: &retentionMS,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, want, topic)
+}
+
+func TestDatabases_UpdateTopic(t *testing.T) {
+	setup()
+	defer teardown()
+
+	var (
+		dbID              = "deadbeef-dead-4aa5-beef-deadbeef347d"
+		topicName         = "events"
+		numPartitions     = uint32(3)
+		replicationFactor = uint32(2)
+		retentionMS       = int64(1000 * 60)
+	)
+
+	body := `{
+	  "topic": {
+	    "name": "events",
+	    "partition_count": 3,
+	    "replication_factor": 2,
+	    "config": {
+	    	"retention_ms": 60000
+	    }
+	  }
+	}`
+
+	path := fmt.Sprintf("/v2/databases/%s/topics/%s", dbID, topicName)
+
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, http.MethodPut)
-		var b UpgradeVersionRequest
-		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&b)
-		require.NoError(t, err)
-		assert.Equal(t, b.Version, upgradeVersionReq.Version)
-		w.WriteHeader(http.StatusNoContent)
+		fmt.Fprint(w, body)
 	})
-	_, err := client.Databases.UpgradeMajorVersion(ctx, dbID, upgradeVersionReq)
+
+	_, err := client.Databases.UpdateTopic(ctx, dbID, topicName, &DatabaseUpdateTopicRequest{
+		Topic: &DatabaseTopic{
+			PartitionCount:    &numPartitions,
+			ReplicationFactor: &replicationFactor,
+			Config: &TopicConfig{
+				RetentionMS: &retentionMS,
+			},
+		},
+	})
+
 	require.NoError(t, err)
+}
+
+func TestDatabases_DeleteTopic(t *testing.T) {
+	setup()
+	defer teardown()
+
+	var (
+		dbID      = "deadbeef-dead-4aa5-beef-deadbeef347d"
+		topicName = "events"
+	)
+
+	path := fmt.Sprintf("/v2/databases/%s/topics/%s", dbID, topicName)
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodDelete)
+	})
+
+	_, err := client.Databases.DeleteTopic(ctx, dbID, topicName)
+	require.NoError(t, err)
+}
+
+func TestDatabases_GetTopic(t *testing.T) {
+	setup()
+	defer teardown()
+
+	var (
+		dbID              = "deadbeef-dead-4aa5-beef-deadbeef347d"
+		topicName         = "events"
+		numPartitions     = uint32(3)
+		replicationFactor = uint32(2)
+		retentionMS       = int64(1000 * 60)
+	)
+
+	want := &DatabaseTopic{
+		Name:              "events",
+		PartitionCount:    &numPartitions,
+		ReplicationFactor: &replicationFactor,
+		Config: &TopicConfig{
+			RetentionMS: &retentionMS,
+		},
+	}
+
+	body := `{
+	  "topic": {
+	    "name": "events",
+	    "partition_count": 3,
+	    "replication_factor": 2,
+	    "config": {
+	    	"retention_ms": 60000
+	    }
+	  }
+	}`
+
+	path := fmt.Sprintf("/v2/databases/%s/topics/%s", dbID, topicName)
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodGet)
+		fmt.Fprint(w, body)
+	})
+
+	got, _, err := client.Databases.GetTopic(ctx, dbID, topicName)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestDatabases_ListTopics(t *testing.T) {
+	setup()
+	defer teardown()
+
+	var (
+		dbID              = "deadbeef-dead-4aa5-beef-deadbeef347d"
+		numPartitions     = uint32(3)
+		replicationFactor = uint32(2)
+		retentionMS       = int64(1000 * 60)
+	)
+
+	want := []DatabaseTopic{
+		DatabaseTopic{
+			Name:              "events",
+			PartitionCount:    &numPartitions,
+			ReplicationFactor: &replicationFactor,
+			Config: &TopicConfig{
+				RetentionMS: &retentionMS,
+			},
+		},
+		DatabaseTopic{
+			Name:              "events_ii",
+			PartitionCount:    &numPartitions,
+			ReplicationFactor: &replicationFactor,
+			Config: &TopicConfig{
+				RetentionMS: &retentionMS,
+			},
+		},
+	}
+
+	body := `{
+	  "topics": [
+	  	{
+		    "name": "events",
+		    "partition_count": 3,
+		    "replication_factor": 2,
+		    "config": {
+		    	"retention_ms": 60000
+		    }
+		  },
+		  {
+		    "name": "events_ii",
+		    "partition_count": 3,
+		    "replication_factor": 2,
+		    "config": {
+		    	"retention_ms": 60000
+		    }
+		  }
+		]		 
+	}`
+
+	path := fmt.Sprintf("/v2/databases/%s/topics", dbID)
+
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, http.MethodGet)
+		fmt.Fprint(w, body)
+	})
+
+	got, _, err := client.Databases.ListTopics(ctx, dbID, &ListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
